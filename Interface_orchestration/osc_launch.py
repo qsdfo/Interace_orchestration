@@ -13,8 +13,8 @@ from osc_server import OrchestraServer
 __DEBUG__ = False
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--in_port', type=int, default=5001)
-parser.add_argument('--out_port', type=int, default=5002)
+parser.add_argument('--in_port', type=int, default=5010)
+parser.add_argument('--out_port', type=int, default=5011)
 parser.add_argument('--ip', type=str, default="127.0.0.1")
 # Model arguments
 parser.add_argument('--hierarchical', type=bool, default=False)

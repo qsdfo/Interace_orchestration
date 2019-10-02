@@ -175,6 +175,7 @@ class OrchestraServer(OSCServer):
         self.dispatcher.map('/set_temperature', osc_parse(self.set_temperature))
         # self.dispatcher.map('/set_instruments_allowed', osc_parse(self.set_instruments_allowed))
         self.dispatcher.map('/load_piano_score', osc_parse(self.load_piano_score))
+        self.dispatcher.map('/load_piano_score_from_live', osc_parse(self.load_piano_score_from_live))
         self.dispatcher.map('/orchestrate', osc_parse(self.orchestrate))
 
     def set_temperature(self, v):
@@ -184,6 +185,48 @@ class OrchestraServer(OSCServer):
     def set_banned_instruments(self, v):
         # TODO receive an int mapped to each instrument ?
         self.banned_instruments = v
+
+    def load_piano_score_from_live(self, *v):
+        """
+
+        :param v:
+        :return:
+        """
+        # Remove prepended shit
+        if v == 'none':
+            return
+        length = v[-1] * self.subdivision
+        v = v[2:-2]
+
+        # List to pianoroll
+        pianoroll = np.zeros((length, 128))
+        pitch = None
+        start_t = None
+        duration = None
+        velocity = None
+        for counter, message in enumerate(v):
+            if counter % 6 == 0:
+                continue
+            elif counter % 6 == 1:
+                pitch = message
+            elif counter % 6 == 2:
+                start_t = message
+            elif counter % 6 == 3:
+                duration = message
+            elif counter % 6 == 4:
+                velocity = message
+            elif counter % 6 == 5:
+                pianoroll[start_t:start_t+duration, pitch] = 1
+
+        # self.piano = piano
+        # self.durations_piano = durations
+        # self.orchestra_init =
+        # self.instrument_presence =
+        # self.orchestra_silenced_instruments =
+        # self.orchestra_unknown_instruments =
+        print('piano score loaded!')
+
+        return
 
     def load_piano_score(self, v):
         """
