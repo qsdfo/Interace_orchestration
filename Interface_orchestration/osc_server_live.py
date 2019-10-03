@@ -120,7 +120,7 @@ def dict2str(dic):
     return str[2:]
 
 
-class OrchestraServer(OSCServer):
+class OrchestraServerLive(OSCServer):
     """
     Key class for the Flow synthesizer server.
 
@@ -147,6 +147,7 @@ class OrchestraServer(OSCServer):
         self.number_sampling_steps = 1
         self.context_size = int((self._model.data_processor_decoder.num_frames_orchestra - 1) // 2)
         self.device = kwargs.get('device')
+        self.sampler = kwargs.get('sampler')
 
         self.instrument_to_index = {
             'Piccolo': 1,
@@ -167,16 +168,15 @@ class OrchestraServer(OSCServer):
 
         self.osc_attributes = []
         # Latent paths variables
-        super(OrchestraServer, self).__init__(*args)
+        super(OrchestraServerLive, self).__init__(*args)
         self.debug = kwargs.get('debug')
 
     def init_bindings(self, osc_attributes=[]):
         """ Set of OSC messages handled """
-        super(OrchestraServer, self).init_bindings(self.osc_attributes)
+        super(OrchestraServerLive, self).init_bindings(self.osc_attributes)
         self.dispatcher.map('/set_temperature', osc_parse(self.set_temperature))
         # self.dispatcher.map('/set_instruments_allowed', osc_parse(self.set_instruments_allowed))
         self.dispatcher.map('/load_piano_score', osc_parse(self.load_piano_score))
-        self.dispatcher.map('/load_piano_score_from_live', osc_parse(self.load_piano_score_from_live))
         self.dispatcher.map('/orchestrate', osc_parse(self.orchestrate))
 
     def set_temperature(self, v):
@@ -187,7 +187,7 @@ class OrchestraServer(OSCServer):
         # TODO receive an int mapped to each instrument ?
         self.banned_instruments = v
 
-    def load_piano_score_from_live(self, *v):
+    def load_piano_score(self, *v):
         """
 
         :param v:
@@ -206,6 +206,7 @@ class OrchestraServer(OSCServer):
 
         # List to pianoroll
         pianoroll = np.zeros((length, 128))
+        onsets = np.zeros((length, 128))
         pitch = None
         start_t = None
         duration = None
@@ -222,40 +223,19 @@ class OrchestraServer(OSCServer):
             elif counter % 6 == 4:
                 velocity = message
             elif counter % 6 == 5:
-                pianoroll[start_t:start_t + duration, pitch] = 1
+                pianoroll[start_t:start_t + duration, pitch] = 100
+                onsets[start_t, pitch] = 100
 
-        # self.piano = piano
-        # self.durations_piano = durations
-        # self.orchestra_init =
-        # self.instrument_presence =
-        # self.orchestra_silenced_instruments =
-        # self.orchestra_unknown_instruments =
-        print('piano score loaded!')
-        self.send('/piano_loaded')
-        return
-
-    def load_piano_score(self, v):
-        """
-
-        When a midi/xm file is dropped in the max/msp patch, it is send to this function.
-        Reads the input file in the self.piano matrix
-        """
-        # Remove prepended shit
-        if v == 'none':
-            return
-        v = re.sub(r'^Macintosh HD:', '', v)
-        print(v)
-
-        #  Load input piano score
         piano, _, rhythm_piano, orchestra_init, \
-        instruments_presence, orchestra_silenced_instruments, orchestra_unknown_instruments = \
-            self._model.data_processor_encoder.dataset.init_generation_filepath(
+            instruments_presence, orchestra_silenced_instruments, orchestra_unknown_instruments = \
+            self._model.data_processor_decoder.dataset.pianoroll_to_formated_tensor(
+                pianoroll_piano={'Piano': pianoroll},
+                onsets_piano={'Piano': onsets},
                 batch_size=1,
                 context_length=self.context_size,
-                filepath=v,
                 banned_instruments=self.banned_instruments,
-                unknown_instruments=self.unknown_instruments,
-                subdivision=self.subdivision)
+                unknown_instruments=self.unknown_instruments
+            )
 
         self.piano = piano
         self.durations_piano = np.asarray(list(rhythm_piano[1:]) + [self.subdivision]) - np.asarray(
@@ -265,18 +245,8 @@ class OrchestraServer(OSCServer):
         self.orchestra_silenced_instruments = orchestra_silenced_instruments
         self.orchestra_unknown_instruments = orchestra_unknown_instruments
 
-        print('piano score loaded...')
-
-        # Write an xml version of the score for printing in the patch
-        piano_writing = piano[0, self.context_size:-self.context_size]
-        piano_stream = self._model.dataset.piano_tensor_to_score(tensor_score=piano_writing,
-                                                                 format='xml',
-                                                                 durations=self.durations_piano,
-                                                                 subdivision=self.subdivision)
-        piano_xml_path = f'{self.writing_dir}/piano.xml'
-        piano_stream.write(fp=piano_xml_path, fmt='xml')
-        self.send('/piano_xml', piano_xml_path)
-        print('and sent')
+        print('piano score loaded!')
+        self.send('/piano_loaded', '0')
         return
 
     def orchestrate(self):
@@ -303,16 +273,10 @@ class OrchestraServer(OSCServer):
         # Write each instrument in the orchestration as a separate xml file
         orchestra_writing = orchestra[0, self.context_size:-self.context_size]
 
-        stream, orchestra_streams, score_dict = self._model.dataset.orchestra_tensor_to_score(
+        score_dict, _ = self._model.dataset.orchestra_tensor_to_dict(
             tensor_score=orchestra_writing,
-            format='midi',
             durations=self.durations_piano,
             subdivision=self.subdivision)
-
-        # for instrument_name, stream in orchestra_streams.items():
-        #     this_path = f'{self.writing_dir}/orch_{instrument_name}.xml'
-        #     stream.write(fp=this_path, fmt='xml')
-        #     self.send(f'/{instrument_name}', this_path)
 
         # For Ableton
         #  First get longest clip and send init_orchestra to max
@@ -337,10 +301,6 @@ class OrchestraServer(OSCServer):
                 list_formatted.append(elem[2] / self.subdivision)  # duration
             self.send(f'/orchestration', list_formatted)
 
-        # For display
-        this_path = f'{self.writing_dir}/orchestration.xml'
-        stream.write(fp=this_path, fmt='xml')
-        self.send(f'/orchestration_display', this_path)
-
         print('done')
+        self.send('/orchestration_done', '1')
         return
